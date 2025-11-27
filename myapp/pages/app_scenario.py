@@ -1,19 +1,11 @@
-# app/app.py
+# app/app_scenario.py
+
 import streamlit as st
 import pandas as pd
 import numpy as np
 
-from utils_scenario import (
-    load_final_data,
-    compute_baseline_and_scenario,
-    clv_closed_form,
-)
-
-
-@st.cache_data
-def get_data():
-    """Charge les données une seule fois (cache Streamlit)."""
-    return load_final_data()
+from filters import load_data, apply_filters
+from utils import compute_baseline_and_scenario, clv_closed_form
 
 
 def page_scenarios():
@@ -29,18 +21,34 @@ Cette page permet de **tester des scénarios marketing** :
 
 et voir l'impact sur :
 - le **CLV moyen** (Customer Lifetime Value),
-- le **CA total** du portefeuille clients.
+- le **CA total** du portefeuille clients (en GBP).
 """
     )
 
     # ===========================
-    # Chargement des données
+    # 0. Chargement + filtres globaux
     # ===========================
-    df = get_data()
+    # -> load_data() vient de filters.py
+    df_raw = load_data()
 
-    # ---------------------------
+    # -> apply_filters() applique les filtres de la sidebar (période, pays,
+    #    type client, seuil commande, retours…)
+    df, filters_summary, badge_retour = apply_filters(df_raw)
+
+    # Petit rappel des filtres appliqués
+    st.caption(
+        f"**Filtres actifs** — Période : {filters_summary['Période']} | "
+        f"Pays : {filters_summary['Pays']} | Type client : {filters_summary['Type client']} | "
+        f"Seuil commande : {filters_summary['Seuil commande']} | Retours : {badge_retour}"
+    )
+
+    if df.empty:
+        st.warning("Aucun client ne correspond aux filtres sélectionnés.")
+        return
+
+    # ===========================
     # 1. Paramètres de base
-    # ---------------------------
+    # ===========================
     st.markdown("## 1. Paramètres de base")
 
     col1, col2 = st.columns(2)
@@ -70,9 +78,9 @@ et voir l'impact sur :
             step=0.01,
         )
 
-    # ---------------------------
+    # ===========================
     # 2. Paramètres du scénario
-    # ---------------------------
+    # ===========================
     st.markdown("## 2. Paramètres du scénario (variation)")
 
     col3, col4 = st.columns(2)
@@ -97,33 +105,6 @@ et voir l'impact sur :
             help="Exemple : +5 = amélioration de la fidélité de 5 points.",
         )
 
-    # ________________________
-    # 2.B Options supplémentaires
-    # ________________________
-    include_returns = st.checkbox(
-        "Inclure les retours (factures commençant par 'C')",
-        value=False,
-        help="Si décoché, on exclut les factures de retour/annulation.",
-    )
-
-    # Filtre cohorte (année) si InvoiceDate est dispo
-    if "InvoiceDate" in df.columns:
-        years = (
-            df["InvoiceDate"]
-            .dt.year.dropna()
-            .sort_values()
-            .unique()
-            .tolist()
-        )
-        years_str = [str(y) for y in years]
-        selected_year = st.selectbox(
-            "Filtrer sur une cohorte (année)",
-            ["Toutes"] + years_str,
-            index=0,
-        )
-    else:
-        selected_year = "Toutes"
-
     # Conversion en [0,1]
     base_margin = base_margin_pct / 100.0
     delta_margin = delta_margin_pct / 100.0
@@ -131,10 +112,11 @@ et voir l'impact sur :
 
     st.markdown("---")
 
-        # ---------------------------
+    # ===========================
     # 3. Calculs + affichage
-    # ---------------------------
+    # ===========================
     if st.button("Calculer le scénario"):
+        # compute_baseline_and_scenario vient de utils.py
         results = compute_baseline_and_scenario(
             df,
             base_margin=base_margin,
@@ -149,65 +131,87 @@ et voir l'impact sur :
         col_a, col_b = st.columns(2)
 
         with col_a:
-            st.metric("CLV moyen baseline", f"{results['clv_base']:,.0f}")
+            st.metric("CLV moyen baseline", f"{results['clv_base']:,.0f} £")
             st.metric(
                 "CLV moyen scénario",
-                f"{results['clv_scenario']:,.0f}",
-                delta=f"{results['clv_scenario'] - results['clv_base']:,.0f}",
+                f"{results['clv_scenario']:,.0f} £",
+                delta=f"{results['clv_scenario'] - results['clv_base']:,.0f} £",
             )
 
         with col_b:
-            st.metric("CA total baseline", f"{results['ca_base']:,.0f}")
+            st.metric("CA total baseline", f"{results['ca_base']:,.0f} £")
             st.metric(
                 "CA total scénario",
-                f"{results['ca_scenario']:,.0f}",
-                delta=f"{results['ca_scenario'] - results['ca_base']:,.0f}",
+                f"{results['ca_scenario']:,.0f} £",
+                delta=f"{results['ca_scenario'] - results['ca_base']:,.0f} £",
             )
 
-        # ---------------------------
-        # A — Afficher la marge en euros
-        # ---------------------------
-        st.markdown("### 🔢 Marge moyenne (en €)")
+        # ---------- A. Marge en GBP ----------
+        st.markdown("### 🔢 Marge moyenne (en £)")
 
-        margin_base_eur = results["clv_base"] * base_margin
-        margin_scenario_eur = results["clv_scenario"] * (base_margin + delta_margin)
+        margin_base_gbp = results["clv_base"] * base_margin
+        margin_scenario_gbp = results["clv_scenario"] * (base_margin + delta_margin)
 
         col_m1, col_m2 = st.columns(2)
         with col_m1:
-            st.metric("Marge baseline", f"{margin_base_eur:,.0f} €")
+            st.metric("Marge baseline", f"{margin_base_gbp:,.0f} £")
         with col_m2:
             st.metric(
                 "Marge scénario",
-                f"{margin_scenario_eur:,.0f} €",
-                delta=f"{margin_scenario_eur - margin_base_eur:,.0f} €",
+                f"{margin_scenario_gbp:,.0f} £",
+                delta=f"{margin_scenario_gbp - margin_base_gbp:,.0f} £",
             )
 
-        # ---------------------------
-        # C — Résumé automatique
-        # ---------------------------
+        # ---------- C. Résumé automatique + reco ----------
         st.markdown("### 📝 Résumé automatique")
 
         delta_clv = results["clv_scenario"] - results["clv_base"]
         delta_ca = results["ca_scenario"] - results["ca_base"]
 
+        # Texte de recommandation "type conseiller"
+        if delta_clv > 0 and delta_ca > 0:
+            reco = (
+                "✅ **Scénario favorable** : il améliore à la fois la valeur client "
+                "et le chiffre d'affaires. Scénario à **prioriser** ou à tester à grande échelle."
+            )
+        elif delta_clv > 0 and delta_ca <= 0:
+            reco = (
+                "⚖️ **CLV en hausse mais CA global en baisse** : scénario intéressant "
+                "pour renforcer la fidélité sur des segments précis, mais à déployer "
+                "avec prudence pour ne pas dégrader le volume global."
+            )
+        elif delta_clv <= 0 and delta_ca > 0:
+            reco = (
+                "📈 **CA en hausse mais CLV en baisse** : bon pour des objectifs de "
+                "volume à court terme (soldes, opérations flash), mais attention au "
+                "**risque de dégrader la valeur long terme** des clients."
+            )
+        else:
+            reco = (
+                "❌ **Scénario défavorable** : il dégrade à la fois le CLV et le CA. "
+                "À éviter ou à fortement ajuster (moins de remise, meilleure cible, etc.)."
+            )
+
         resume = f"""
-        📌 **Résumé du scénario appliqué**
+📌 **Résumé du scénario appliqué**
 
-        - Variation de marge : **{delta_margin_pct:+.1f} points**
-        - Variation de rétention : **{delta_r_pts:+.1f} points**
-        - Impact sur le CLV : **{delta_clv:+,.0f} €**
-        - Impact sur le CA total : **{delta_ca:+,.0f} €**
+- Variation de marge : **{delta_margin_pct:+.1f} points**
+- Variation de rétention : **{delta_r_pts:+.1f} points**
+- Impact sur le CLV : **{delta_clv:+,.0f} £**
+- Impact sur le CA total : **{delta_ca:+,.0f} £**
 
-        👉 Cela signifie que votre action marketing entraîne un changement  
-        de **{delta_clv:+,.0f} € par client**, soit un effet global de  
-        **{delta_ca:+,.0f} €** sur l’ensemble du portefeuille.
-        """
+👉 Cela signifie que votre action marketing entraîne un changement  
+de **{delta_clv:+,.0f} £ par client**, soit un effet global de  
+**{delta_ca:+,.0f} £** sur l’ensemble du portefeuille filtré.
+
+**Recommandation :** {reco}
+"""
 
         st.info(resume)
 
         st.caption(
             f"Nombre de clients pris en compte : {results['n_customers']:,} – "
-            f"Revenu moyen par client observé : {results['avg_rev']:,.0f}."
+            f"Revenu moyen par client observé : {results['avg_rev']:,.0f} £."
         )
 
         # ===========================
@@ -215,15 +219,25 @@ et voir l'impact sur :
         # ===========================
         st.markdown("## 4. Comparaison baseline vs scénario (barres)")
 
-        clv_df = pd.DataFrame(
-            {"Scénario": ["Baseline", "Scénario"],
-             "CLV": [results["clv_base"], results["clv_scenario"]]}
-        ).set_index("Scénario")
+        clv_df = (
+            pd.DataFrame(
+                {
+                    "Scénario": ["Baseline", "Scénario"],
+                    "CLV": [results["clv_base"], results["clv_scenario"]],
+                }
+            )
+            .set_index("Scénario")
+        )
 
-        ca_df = pd.DataFrame(
-            {"Scénario": ["Baseline", "Scénario"],
-             "CA": [results["ca_base"], results["ca_scenario"]]}
-        ).set_index("Scénario")
+        ca_df = (
+            pd.DataFrame(
+                {
+                    "Scénario": ["Baseline", "Scénario"],
+                    "CA": [results["ca_base"], results["ca_scenario"]],
+                }
+            )
+            .set_index("Scénario")
+        )
 
         col_c, col_d = st.columns(2)
         with col_c:
@@ -234,7 +248,7 @@ et voir l'impact sur :
             st.bar_chart(ca_df)
 
         # ===========================
-        # 5. Sensibilité : CLV selon la rétention
+        # 5. Sensibilité : CLV en fonction de r
         # ===========================
         st.markdown("## 5. Sensibilité : CLV en fonction de la rétention r")
 
@@ -247,11 +261,14 @@ et voir l'impact sur :
             for r in r_values
         ]
 
-        sens_r_df = pd.DataFrame({"r": r_values, "CLV": clv_values_r}).set_index("r")
+        sens_r_df = (
+            pd.DataFrame({"r": r_values, "CLV": clv_values_r})
+            .set_index("r")
+        )
         st.line_chart(sens_r_df)
 
         # ===========================
-        # B — Sensibilité : CLV selon la marge
+        # 6. Sensibilité : CLV en fonction de la marge
         # ===========================
         st.markdown("## 6. Sensibilité : CLV en fonction de la marge (%)")
 
@@ -264,12 +281,14 @@ et voir l'impact sur :
             for m in m_values
         ]
 
-        sens_m_df = pd.DataFrame({"Marge": m_values, "CLV": clv_values_m}).set_index("Marge")
+        sens_m_df = (
+            pd.DataFrame({"Marge": m_values, "CLV": clv_values_m})
+            .set_index("Marge")
+        )
         st.line_chart(sens_m_df)
 
 
 def main():
-    # Pour l’instant : une seule page = Scénarios
     page_scenarios()
 
 
