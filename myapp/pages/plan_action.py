@@ -1,8 +1,3 @@
-"""
-MODULE PLAN D'ACTION - APPLICATION MARKETING
-Permet d'exporter les données actionnables et les visualisations pour passage à l'exécution
-"""
-
 import streamlit as st
 import pandas as pd
 import numpy as np
