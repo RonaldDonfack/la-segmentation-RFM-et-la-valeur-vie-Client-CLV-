@@ -1,7 +1,3 @@
-"""
-Page Streamlit : Plan d'Action
-Génération de listes activables et exports pour passage à l'exécution
-"""
 
 import streamlit as st
 import sys
@@ -36,4 +32,5 @@ df_filtered, filters_summary, badge = apply_filters(df)
 rfm_df = compute_rfm(df_filtered, prefer_neutralized=True)
 
 # Rendu de la page Plan d'Action
+
 render_plan_action_page(df_filtered, rfm_df, filters_summary, badge)
