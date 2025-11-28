@@ -7,9 +7,9 @@ from datetime import datetime
 import io
 import base64
 
-# Imports locaux (à adapter selon votre structure)
-# from utils import compute_rfm, compute_global_kpis
-# from filters import apply_filters
+
+from utils import compute_rfm, compute_global_kpis
+from filters import apply_filters
 
 
 def create_actionable_list(df, rfm_df, filters_summary):
